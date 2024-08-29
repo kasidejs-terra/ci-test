@@ -1,0 +1,54 @@
+name: Manual Build
+run-name: Deploy with ${{ github.event_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to run build against"
+        type: environment
+        required: true
+
+env:
+  DOCKER_IMAGE: xxxxx
+  DOCKER_TAG: ${{ inputs.environment }}
+
+jobs:
+  manual-build:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # This is required for requesting the JWT
+      contents: read  # This is required for actions/checkout
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::530919100808:role/github-cicd-role
+          role-session-name: "${{ github.event.repository.name }}-${{github.run_number}}"
+          aws-region: ap-southeast-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: "${{ steps.login-ecr.outputs.registry }}/${{ github.event.repository.name }}"
+          flavor: |
+            latest=false
+
+      - name: Pull Docker Image
+        run: docker pull ${{ steps.meta.outputs.tags }} || true
+
+      - name: Build Docker Image
+        run: |
+          docker build --cache-from ${{ steps.meta.outputs.tags }} --build-arg APP_COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7) -f Dockerfile -t ${{ steps.meta.outputs.tags }} .
+
+      - name: Push Docker Image
+        run: echo docker push ${{ steps.meta.outputs.tags }}
